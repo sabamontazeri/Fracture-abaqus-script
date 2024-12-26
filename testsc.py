@@ -260,6 +260,4 @@ model.HistoryOutputRequest(contourType=T_STRESS, contourIntegral='Crack-tip',
                            createStepName='Step-1', name='T-Stress', 
                            numberOfContours=Ncontour, rebar=EXCLUDE, 
                            sectionPoints=DEFAULT, 
-                           stressInitializationStep='Initial')
-print('hi')
-,,,
+                           stressInitializationStep='Initial');
