@@ -20,6 +20,7 @@ from visualization import *
 from connectorBehavior import *
 from odbAccess import *
 import math
+
 # input params
 
 
@@ -101,20 +102,23 @@ pickedFaces = f.findAt((2,0,0),)
 edges=my_part.edges
 edge=edges.findAt((5.,0.,0.),)
 cell = my_part.cells[0]
-print(edge)
+##Open sheet
 partition_sketch = model.ConstrainedSketch(name='Partition Sketch', sheetSize=1)
+##Sketching crack
 partition_sketch.Line(point1=(L,H/2), point2=(L-cl,H/2))
+##Sketching Circles
 partition_sketch.CircleByCenterPerimeter(center=(L-cl,H/2), point1=(L-cl+r,H/2))
 partition_sketch.CircleByCenterPerimeter(center=(L-cl,H/2), point1=(L-cl+(cl/2),H/2))
+##Sketching Square lines
 partition_sketch.Line(point1=(L,(H/2)-cl),point2=(L,+(H/2)+cl))
 partition_sketch.Line(point1=(L-2*cl,(H/2)+cl),point2=(L,(H/2)+cl))
 partition_sketch.Line(point1=(L-2*cl,(H/2)-cl),point2=(L-2*cl,(H/2)+cl))
-####
+####Sketching 90 degree lines
 partition_sketch.Line(point1=(L-2*cl,(H/2)-cl),point2=(L,(H/2)-cl))
 partition_sketch.Line(point1=(L-2*cl,(H/2)),point2=(L-cl,(H/2)))
 partition_sketch.Line(point1=(L-cl,(H/2)),point2=(L-cl,(H/2)+cl))
 partition_sketch.Line(point1=(L-cl,(H/2)),point2=(L-cl,(H/2)-cl))
-#####
+#####Sketching 45 degree lines
 partition_sketch.Line(point1=(L-cl,(H/2)),point2=(L,(H/2)+cl))
 partition_sketch.Line(point1=(L-cl,(H/2)),point2=(L,(H/2)-cl))
 partition_sketch.Line(point1=(L-cl,(H/2)),point2=(L-2*cl,(H/2)+cl))
@@ -171,7 +175,8 @@ model.HomogeneousSolidSection(material='steel', name='steel_section')
 
 ## Section Assignments
 region = my_part.Set(cells=my_part.cells, name='All_Cells')
-my_part.SectionAssignment(region=region, sectionName='steel_section', offset=0.0, offsetType=MIDDLE_SURFACE, offsetField='', thicknessAssignment=FROM_SECTION)
+my_part.SectionAssignment(region=region, sectionName='steel_section',
+ offset=0.0, offsetType=MIDDLE_SURFACE, offsetField='', thicknessAssignment=FROM_SECTION)
 
 
 
@@ -186,25 +191,52 @@ datum_id = datum_plane.id
 partition_face = assembly.datums[datum_id]
 assembly.PartitionCellByDatumPlane(datumPlane=partition_face, cells=instance.cells)
 
+##Step
+step_name = 'Step-1'
+mdb.models['toy_model'].StaticStep(name=step_name, previous='Initial', timePeriod=1.0)
+# Output
+model.FieldOutputRequest(
+name='F-Output-1',
+createStepName='Step-1',
+variables=('S', 'U', 'RF', 'ENER', 'ELEN'))
+##History and field output
+model.fieldOutputRequests['F-Output-1'].setValues(variables=('S','U','RF', 
+                                                                        'ENER','ELEN'))
+model.HistoryOutputRequest(contourType=J_INTEGRAL, contourIntegral='Crack-tip', 
+                                createStepName='Step-1', name='J-Integral', 
+                                numberOfContours=Ncontour, rebar=EXCLUDE, 
+                                sectionPoints=DEFAULT, 
+                                stressInitializationStep='Initial');
+model.HistoryOutputRequest(contourType=K_FACTORS, contourIntegral='Crack-tip', 
+                                createStepName='Step-1', name='K-value', 
+                                numberOfContours=Ncontour, rebar=EXCLUDE, 
+                                sectionPoints=DEFAULT, 
+                                stressInitializationStep='Initial');
+model.HistoryOutputRequest(contourType=T_STRESS, contourIntegral='Crack-tip', 
+                                createStepName='Step-1', name='T-Stress', 
+                                numberOfContours=Ncontour, rebar=EXCLUDE, 
+                                sectionPoints=DEFAULT, 
+                                stressInitializationStep='Initial')
 
-# Step
-model.StaticStep(name='Step-1', previous='Initial')
 
 ##crack
+face_indexes=[22,42,79]
 f1 = assembly.instances['Instance 1'].faces
-pickedface=instance.faces.getSequenceFromMask(mask=('[#0:2 #8000 ]',))+instance.faces.getSequenceFromMask(mask=('[#0 #200 ]',),)+instance.faces.getSequenceFromMask(mask=('[#0 #200 ]',),)+instance.faces.getSequenceFromMask(mask=('[#0 #400 ]',),)
-
-assembly.Set(faces=pickedface, name='CRACK_SEAM')
+picked_faces = instance.faces[22:23] + instance.faces[42:43] + instance.faces[79:80]
+assembly.Set(faces=picked_faces, name='CRACK_SEAM')
 pickedRegions = assembly.sets['CRACK_SEAM']
-mdb.models['toy_model'].rootAssembly.engineeringFeatures.assignSeam(regions=pickedRegions)
+mdb.models['toy_model'].rootAssembly.engineeringFeatures.assignSeam(
+    regions=pickedRegions)
 crack_vertices = instance.vertices.findAt(((L-cl,H/2,0),))
+crack_edges = instance.edges.findAt(((6.,7.,500.E-03),))
+##Defining Crack with contour integral
 assembly.engineeringFeatures.ContourIntegral(
     collapsedElementAtTip=SINGLE_NODE,
     extensionDirectionMethod=Q_VECTORS,
     symmetric=OFF,
     midNodePosition=0.25,
-    crackFront=Region(vertices=crack_vertices),
-    crackTip=Region(vertices=crack_vertices),
+    crackFront=Region(edges=crack_edges),
+    crackTip=Region(edges=crack_edges),
     name=('Crack-tip'),
     qVectors=(((L,H/2,0.0), (L-cl,H/2,0.0)),)
     )
@@ -217,8 +249,10 @@ ref_point_id = ref_point.id
 # Create assembly set for the reference point
 assembly.Set(referencePoints=(assembly.referencePoints[ref_point_id],), name='RP_Set')
 ##edge for couple
-edgecouple = instance.edges.findAt(((L/2,H,0.7),))  # Replace with coordinates on the edge
-assembly.Set(edges=(edgecouple,), name='Edge_Set')
+facecouple1 = instance.faces.findAt(((2*L/3,H,0.7),))  
+facecouple2 = instance.faces.findAt(((L/6,H,0.7),)) 
+facecouple=(facecouple1,facecouple2) 
+assembly.Set(faces=facecouple, name='face_Set')
 
 
 # Create the coupling constraint
@@ -226,38 +260,152 @@ assembly.Set(edges=(edgecouple,), name='Edge_Set')
 mdb.models['toy_model'].Coupling(
     name='Coupling_Constraint',
     controlPoint=assembly.sets['RP_Set'],
-    surface= assembly.sets['Edge_Set'],
+    surface= assembly.sets['face_Set'],
     influenceRadius=WHOLE_SURFACE,
     couplingType=KINEMATIC,
     u1=ON, u2=ON, u3=ON, ur1=ON, ur2=ON, ur3=ON  # Adjust degrees of freedom as needed
 )
-##Loading
-mdb.models['toy_model'].ConcentratedForce(name='Load-1', createStepName='Step-1', 
-                        region=assembly.sets['RP_Set'], cf2=-F, distributionType=UNIFORM, 
-                        field='', localCsys=None)
+
 
 # fixed BC
-edgeBC1 = instance.edges.findAt(((L,0.,500.E-03),))
-edgeBC2 = instance.edges.findAt(((0,0.,500.E-03),))
-edgesbc=(edgeBC1,edgeBC2)
-region = assembly.Set(edges=edgesbc, name='fixedBC_set')
-fixedBC = model.DisplacementBC(name='fixed_BC',createStepName='Initial',region=region, u1=0.0, u2=0.0, u3=UNSET)
+BC1 = instance.faces.findAt(((2*L/3,0,0.7),))
+BC2 = instance.faces.findAt(((L/6,0,0.7),))
+facesbc=(BC1,BC2)
+region = assembly.Set(faces=facesbc, name='fixedBC_set')
+fixedBC = model.DisplacementBC(name='fixed_BC',createStepName='Initial',
+region=region, u1=0.0, u2=0.0, u3=UNSET)
 
-# Output
-model.fieldOutputRequests['F-Output-1'].setValues(variables=('S','U','RF', 
-                                                                 'ENER','ELEN'))
-model.HistoryOutputRequest(contourType=J_INTEGRAL, contourIntegral='Crack-tip', 
-                           createStepName='Step-1', name='J-Integral', 
-                           numberOfContours=Ncontour, rebar=EXCLUDE, 
-                           sectionPoints=DEFAULT, 
-                           stressInitializationStep='Initial');
-model.HistoryOutputRequest(contourType=K_FACTORS, contourIntegral='Crack-tip', 
-                           createStepName='Step-1', name='K-value', 
-                           numberOfContours=Ncontour, rebar=EXCLUDE, 
-                           sectionPoints=DEFAULT, 
-                           stressInitializationStep='Initial');
-model.HistoryOutputRequest(contourType=T_STRESS, contourIntegral='Crack-tip', 
-                           createStepName='Step-1', name='T-Stress', 
-                           numberOfContours=Ncontour, rebar=EXCLUDE, 
-                           sectionPoints=DEFAULT, 
-                           stressInitializationStep='Initial');
+
+
+##cells
+c1 = assembly.instances['Instance 1'].cells
+cell_indices = [2, 6,7,8,13,24,25,26]
+pickedcell =   tuple(instance.cells[i] for i in cell_indices)
+
+# Meshing Parameters
+assembly.seedPartInstance(regions=(instance, ), deviationFactor=0.1, 
+                          minSizeFactor=0.1, size=0.2)
+assembly.setMeshControls(regions=pickedcell, technique=SWEEP,elemShape=WEDGE)
+cell_indices2 = [0,1,3,4,5,9,10,11,12,14,15,16,17,18,19,20,21,22,23]
+pickedcell2 =   tuple(instance.cells[i] for i in cell_indices2)
+
+assembly.setMeshControls(regions=pickedcell2 , elemShape=HEX, 
+                         technique=STRUCTURED)
+
+
+# Assign Element Type
+assembly.setElementType(elemTypes=(ElemType(elemCode=C3D8,elemLibrary=STANDARD),
+                                   ElemType(elemCode=C3D8, 
+                                            elemLibrary=STANDARD)), 
+                        regions=(instance.cells, ))
+
+
+# Select edges for local seeding
+# Replace the coordinates with the actual location of the edges
+edges_to_seed = instance.edges.findAt(
+    ((0, H, 0.5),),  # First edge coordinates
+    ((L, H, 0.5),),
+    ((0, 0, 0.5),),
+    ((L, 0, 0.5),),  # Second edge coordinates (if applicable)
+)
+
+# Assign local seed by number to the selected edges
+number_of_elements = 6  # Desired number of elements along the edge
+assembly.seedEdgeByNumber(edges=edges_to_seed, number=number_of_elements, constraint=FINER)
+
+
+# Generate the mesh
+assembly.generateMesh(regions=instance.cells,seedConstraintOverride=ON,
+                      meshTechniqueOverride=OFF)
+
+
+#Snpashot
+session.viewports['Viewport: 1'].setValues(displayedObject=assembly)
+session.viewports['Viewport: 1'].assemblyDisplay.setValues(mesh=ON,
+                                                     optimizationTasks=OFF, 
+                                                     geometricRestrictions=OFF, 
+                                                     stopConditions=OFF)
+session.viewports['Viewport: 1'].assemblyDisplay.meshOptions.setValues(meshTechnique=ON)
+session.viewports['Viewport: 1'].view.setValues(nearPlane=30.,
+                                                farPlane=31,
+                                                width=L*2,
+                                                height=L*2,
+                                                viewOffsetX=0,
+                                                viewOffsetY=0)
+session.printToFile(fileName='mesh_01.png', format=PNG, canvasObjects=(
+    session.viewports['Viewport: 1'], ))
+
+load_values = [7000, 200, 300]
+with open('results.dat', 'w') as f:
+    for i, load_value in enumerate(load_values):
+
+        # Apply the concentrated force
+        mdb.models['toy_model'].ConcentratedForce(
+            name='Load-{}'.format(i + 1), createStepName=step_name, region=assembly.sets['RP_Set'],
+            cf1=load_value, distributionType=UNIFORM, field='', localCsys=None
+        )
+        mdb.models['toy_model'].Moment(name='LoadMoment-{}'.format(i + 1),
+        createStepName=step_name, region=assembly.sets['RP_Set'],cm3=141055)
+        
+        # Create a job for the current load
+        job_name = 'CrackJob-{}'.format(i + 1)
+        mdb.Job(name=job_name, model=model_name, type=ANALYSIS, explicitPrecision=SINGLE,
+                nodalOutputPrecision=SINGLE, description='CrackJob-{}'.format(i + 1))
+        
+        # Submit the job
+        mdb.jobs[job_name].submit()
+        mdb.jobs[job_name].waitForCompletion()
+
+        
+        # Extracting results
+        session.openOdb(name='CrackJob-{}'.format(i + 1)+'.odb',  readOnly=True)
+        output = session.odbs['CrackJob-{}'.format(i + 1)+'.odb']
+
+        # Access the step in the ODB
+        step = output.steps[step_name]
+
+        for historyRegionName in step.historyRegions.keys():
+            print(historyRegionName)
+
+
+        # To find keys, 1) abaqus cae nogui 2) >>> print(output.steps.keys()) 
+        # 3) >>> print(output.steps['Step-1'].historyRegion.keys()) ...
+        tmp = output.steps['Step-1'].historyRegions['ElementSet  ALL ELEMENTS'].historyOutputs
+
+        K1_value = []
+        K2_value = []
+        J_value = []
+        T_value = []
+
+
+        for item in tmp.keys():
+            if item[0:2] == 'K1':
+                K1_value.append(tmp[item].data[0][1])   
+            if item[0:2] == 'K2':
+                K2_value.append(tmp[item].data[0][1])    
+            if item[0:2] == 'J ':
+                J_value.append(tmp[item].data[0][1])   
+            if item[0:2] == 'T-':
+                T_value.append(tmp[item].data[0][1])
+
+        load=load_values[i]
+            # Write headers
+        f.write('# K1 value CrackJob-{}\n'.format(load))
+        for item in K1_value:
+            f.write('%.4e ' % item)
+        f.write('\n')
+
+        f.write('# K2 value CrackJob-{}\n'.format(load))
+        for item in K2_value:
+            f.write('%.4e ' % item )
+        f.write('\n')
+
+        f.write('# J value CrackJob-{}\n'.format(load))
+        for item in J_value:
+            f.write('%.4e ' % item)
+        f.write('\n')
+
+        f.write('# T value CrackJob-{}\n'.format(load))
+        for item in T_value:
+            f.write('%.4e ' % item)
+        f.write('\n')
